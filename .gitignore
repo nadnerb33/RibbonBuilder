@@ -1,3 +1,8 @@
+*.tab
+*.dat
+Archive/*
+
+
 # Windows thumbnail cache files
 Thumbs.db
 ehthumbs.db

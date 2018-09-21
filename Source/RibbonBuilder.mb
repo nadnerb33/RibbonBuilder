@@ -1,0 +1,644 @@
+'*******************************************************************************************************************************
+'* Program Name:	RibbonBuilder
+'* Version:			0.52
+'* Description:		A tool developed for MI Pro 64bit with the new ribbon interface. 
+'*                  The tool allows you to customise the layout and content of custom ribbons via an easy to use spreadsheet 
+'*					with no need for MapBasic code.
+'* 
+'* Developed By:	Brendan Stone - NHS SCW CSU
+'* Date:			21/09/2018
+'*******************************************************************************************************************************
+
+Include "MapBasic.def"
+Include "Enums.def"
+Include "IMapInfoPro.def"
+
+Include "..\..\_mbLibrary\MI_ICONS_X64.def"
+
+Include "..\..\_mbLibrary\RIBBONLib.def"
+Include "..\..\_mbLibrary\MAPPERLib.def"
+Include "..\..\_mbLibrary\ProgramInfo.def"
+
+Declare Sub Main
+Declare Sub createRibbonTabs
+Declare Sub createRibbonGroups
+Declare Sub createRibbonSubgroups
+Declare Sub createRibbonButtons
+Declare Sub openXLSX(ByVal tab as string)
+Declare Sub openTAB(ByVal TabName as string)
+Declare Sub openTools
+Declare Sub cleanup
+Declare Sub EndHandler
+
+Declare Sub subgroupClicked
+Declare Sub buttonClicked
+Declare Sub runTheAction(ByVal i as Integer)
+Declare Sub openLayer(ByVal clickedButtonID as Integer)
+Declare Sub browseTable(ByVal clickedButtonID as Integer)
+Declare Sub runTool(ByVal clickedButtonID as Integer)
+Declare Sub runCustomCommand(ByVal clickedButtonID as Integer)
+Declare sub populateRibbon
+Declare sub killTable (ByVal tab2kill as string)
+
+Declare Function IsTableOpen(ByVal sTabName As String) As Logical
+Declare Function formatImageURI(ByVal image as String) As String
+
+
+Type SubGroupObjType
+	CtrlIdx as Integer
+	Action as String
+End Type
+Dim SubGroupObj() as SubGroupObjType
+
+Type ButtonObjType
+	Name as String
+	DisplayName as String
+	Type as String
+	Action as String
+	Group as String
+	Tab as String
+	Path as String
+	LayerScale as Float
+	CtrlIdx as Integer
+	nCtrlIdx as Integer
+End Type
+Dim ButtonObj() as ButtonObjType
+
+Dim versionNo as String
+
+'*************************************
+Sub Main
+	versionNo = "0.52" 'version no should also be updated in the filename in the .mbp file
+
+	If (SystemInfo(SYS_INFO_MIPLATFORM) = MIPLATFORM_WIN64) And (SystemInfo(SYS_INFO_MAPINFO_INTERFACE) = MIINTERFACE_RIBBON) then
+		'print "------------------RIBBON BUILDER STARTED--------------------------"
+	else
+		Note "This application must be run in the 64 bit version of Mapinfo Pro"
+		Exit Sub
+	End If
+
+	Dim startTime as Float
+	startTime = timer()
+	
+	'Call cleanup
+	'print chr$(12)
+	
+	'***Initializing ProgramInfo
+	Call PRGISetApplicationName("RibbonBuilder")
+	Call PRGISetApplicationVersion(versionNo)
+	Call PRGISetApplicationCopyrightYear("2018")
+	Call PRGISetApplicationDevelopedBy("Brendan Stone")
+	Call PRGISetCopyrightCompany("NHS SCW")
+	Call PRGISetWebPageName("HealthGIS")
+	Call PRGISetWebPageURL("http://www.healthgis.nhs.uk")
+	Call PRGISetApplicationImageUri(MI_IMG_MAP_ADDBASEMAP_32)
+	Call PRGISetDescription("Easily add tabs, groups & buttons to MIPro")
+	
+	Call populateRibbon 'this will build the tab files used to run the tool (if they dont already exist) and then populate the ribbon
+
+	Call RBNNotificationShow(PRGIGetApplicationName(), "RibbonBuilder Completed", Notify_Info, 4000)
+	'print "------------------RIBBON BUILDER COMPLETED------------------------"
+	'print "Elapsed Time: " & (timer() - startTime)
+	'note "done"
+End Sub
+
+
+Sub cleanup
+	Call killTable (ApplicationDirectory$()&"Tabs")
+	Call killTable (ApplicationDirectory$()&"Groups")
+	Call killTable (ApplicationDirectory$()&"Subgroups")
+	Call killTable (ApplicationDirectory$()&"Buttons")
+	Call killTable (ApplicationDirectory$()&"Tools")
+	Call killTable (ApplicationDirectory$()&"TB_tempConfig")
+	Call killTable (ApplicationDirectory$()&"TB_Config")
+End Sub
+
+Sub populateRibbon
+	'Open pre-created TABs
+OnError GoTo openConfigError
+
+	Call openTAB("Tabs")
+	Call openTAB("Groups")
+	Call openTAB("Subgroups")
+	Call openTAB("Buttons")
+	Call openTAB("Tools")
+
+	'create ribbon elements	
+	Call createRibbonTabs
+	Call createRibbonGroups
+	Call createRibbonSubgroups
+	Call createRibbonButtons
+	Call openTools 
+	Exit Sub
+	
+	openConfigError:
+		Print Error$()
+		Resume Next
+End Sub
+
+Sub openTAB(ByVal TabName as string)
+	If FileExists(ApplicationDirectory$() & TabName & ".TAB") Then
+       Open Table ApplicationDirectory$() & TabName 
+	Else
+		'print ".TAB doesnt exist so openning xlsx instead"
+		Call openXLSX(TabName)
+	End If
+End Sub
+
+Sub openXLSX (ByVal sXLSXTabName as string)
+	'print "opening " & sXLSXTabName
+	OnError GoTo defaulterror 
+	
+	Call killTable(sXLSXTabName) 'just in case there are other parts still there, e.g .dat etc
+	Register Table ApplicationDirectory$() & "Config.xlsx"  TYPE XLS Titles  Range sXLSXTabName Into ApplicationDirectory$() & "TB_tempConfig.TAB"
+	Open Table ApplicationDirectory$() &  "TB_tempConfig.TAB" Hide
+	Commit Table TB_tempConfig as ApplicationDirectory$() &  "TB_Config.TAB"
+	Open Table ApplicationDirectory$() &  "TB_Config.TAB" Hide
+	Alter Table TB_Config ( modify ID Integer )
+	SELECT * FROM TB_Config WHERE ID <> 0 ORDER BY ID INTO TB_ConfigQ HIDE 
+	Commit Table TB_ConfigQ As ApplicationDirectory$() & sXLSXTabName & ".TAB"
+	Call killTable ("TB_tempConfig")
+	Call killTable ("TB_Config")
+	Open Table ApplicationDirectory$() & sXLSXTabName & ".TAB" hide
+	Exit Sub
+	defaulterror:
+		'print "error opening xlsx"
+		'this error is usually that the XLSX is open in Excel, but if ignored there doesnt seem to be any issues...?
+		Resume Next
+End Sub
+
+Sub openTools
+	Fetch First From Tools 
+	Do Until EOT(Tools)
+		OnError GoTo tryRestart
+		If FileExists(Tools.MBXPath) Then
+
+			Terminate Application PathToFileName$(Tools.MBXPath) 'try and close the mbx if it's already running to prevent duplicate instances/buttons etc
+			Run Application Tools.MBXPath 'load the mbx
+			GoTo endOfLoop
+			
+			tryRestart: 'try restarting the mbx 1 more time
+				OnError GoTo skip
+				print "restarting application: " & Tools.MBXPath
+				Terminate Application PathToFileName$(Tools.MBXPath)
+				Run Application Tools.MBXPath
+				GoTo endofloop
+				
+			skip:
+				Print "Error opening: " & Tools.MBXPath
+				Resume Next
+			endOfLoop:
+		Else 'MBX doesnt exist
+			print Tools.MBXPath & " doesnt exist, so skipping it."
+			
+		End If
+		Fetch Next From Tools
+	Loop
+	Close Table Tools
+End Sub
+
+Sub createRibbonTabs
+	OnError GoTo defaulterror 
+	Dim	nCtrlIdx As Integer
+
+	Fetch First From Tabs 'this is the 'Tabs' tab in XLSX
+	Do Until EOT(Tabs)
+		If NOT RBNTabExists(Tabs.TabName) Then
+			nCtrlIdx = RBNAddTab(Tabs.TabName, Tabs.TabDisplayName, "")
+			If nCtrlIdx = 0 Then
+				Note "An error occured while adding a new tab Called & '" & Tabs.TabName & "' to the ribbon!"
+				Exit Sub
+			End If
+		End If
+		Fetch Next From Tabs
+	Loop
+	Fetch First From Tabs
+	Call RBNSelectTab(Tabs.TabName) 'this will activate the first tab in the XLSX
+	Close Table Tabs
+	Exit Sub
+	defaulterror:
+		print "Error in createRibbonTabs(): " & Error$() & " " & Err()
+		End Program
+End Sub
+
+Sub createRibbonGroups
+	OnError GoTo defaulterror 
+	Dim	nCtrlIdx As Integer
+	Fetch First From Groups 
+	Do Until EOT(Groups)
+		If NOT RBNTabGroupExists(Groups.TabName, Groups.GroupName) Then
+			nCtrlIdx = RBNTabAddGroup(Groups.GroupName, Groups.GroupDisplayName, Groups.TabName)
+			If NOT nCtrlIdx > 0 Then
+				Exit Sub
+			End If
+		End If
+		Fetch Next From Groups
+	Loop
+	Close Table Groups
+	Exit Sub
+	defaulterror:
+		print "Error in createRibbonGroups(): " & Error$() & " " & Err()
+		End Program
+End Sub
+
+Sub createRibbonSubgroups
+	OnError GoTo defaulterror 
+	Dim	nCtrlIdx, subgroupID As Integer
+	Fetch First From Subgroups 
+	Do Until EOT(Subgroups)
+		subgroupID = subgroupID + 1
+		If(Subgroups.ButtonAction <> "") Then 'split button
+			nCtrlIdx	= RBNGroupAddControl(Subgroups.Name, Subgroups.DisplayName, "", ControlType_SplitButton, Subgroups.TabName, Subgroups.GroupName)
+			Call RBNControlSetCustomMBXHandlerIdx(nCtrlIdx, "subgroupClicked")
+		Else 'regular button
+			nCtrlIdx = RBNGroupAddControl(Subgroups.Name, Subgroups.DisplayName, "", 9, Subgroups.TabName, Subgroups.GroupName)
+		End If
+		
+		Do  Case Subgroups.Size 'Set the style of subgroup button
+			Case "Large"
+				Call RBNControlSetIconsIdx(nCtrlIdx, CONTROL_SIZE_LARGE, "", formatImageURI(Subgroups.ImageUpdated) )
+			Case Else 'Small or anything else
+				Call RBNControlSetIconsIdx(nCtrlIdx, CONTROL_SIZE_SMALL, "", formatImageURI(Subgroups.ImageUpdated) )
+		End Case
+				
+		'store the subgroups in an array - used as a lookup when one is clicked
+		ReDim SubGroupObj(subgroupID)
+		SubGroupObj(subgroupID).CtrlIdx = RBNControlGetControlIDIdx(nCtrlIdx)
+		SubGroupObj(subgroupID).Action = Subgroups.ButtonAction
+		
+		'what is this doing, is it required?		
+		If(Subgroups.ButtonAction <> "") Then 'split button
+			nCtrlIdx	= RBNSplitButtonAddGroup(Subgroups.Name & "ButGrp", "", Subgroups.TabName, Subgroups.GroupName, Subgroups.Name)
+		Else 'regular button
+			nCtrlIdx = RBNDropDButtonAddGroup (Subgroups.Name & "ButGrp", "", Subgroups.TabName, Subgroups.GroupName, Subgroups.Name)
+		End If
+		Fetch Next From Subgroups
+	Loop
+	Close Table Subgroups
+	Exit Sub
+	defaulterror:
+		print "Error in createRibbonSubgroups(): " & Error$() & " " & Err()
+		End Program
+End Sub
+
+Sub createRibbonButtons
+	OnError GoTo defaulterror
+	Dim nCtrlIdx, buttonID, missingButtons as integer
+	Fetch First From Buttons
+	Do Until EOT(Buttons)
+		buttonID = buttonID + 1
+		
+		'add button to group or subgroup
+		OnError GoTo addButtOnError
+		Do Case LEFT$(Buttons.Parent,2) 
+			Case "SG" 'Subgroup
+				nCtrlIdx =  RBNDropDButtonGroupAddControl(Buttons.Name, Buttons.DisplayName, "", ControlType_Button, Buttons.Tab, Buttons.Group, Buttons.Parent, Buttons.Parent & "ButGrp")		
+			Case "G_" 'group
+				nCtrlIdx = RBNGroupAddButton(Buttons.Name, Buttons.DisplayName, "", Buttons.Tab, Buttons.Group)
+				If (Buttons.ButtonType = "ToggleButton") Then
+					Call RBNControlToggleIdx(nCtrlIdx, TRUE)
+				End If
+		End Case
+
+		'set button size
+		Do  Case Buttons.Size 'Set the style of subgroup button
+			Case "Large"
+				Call RBNControlSetIconsIdx(nCtrlIdx, CONTROL_SIZE_LARGE, "", formatImageURI(Buttons.ImageUpdated))
+			Case Else 'Small or anything else
+				Call RBNControlSetIconsIdx(nCtrlIdx, CONTROL_SIZE_SMALL, "", formatImageURI(Buttons.ImageUpdated))
+		End Case
+		
+		'add tooltip
+		If(Buttons.Tooltip <> "") Then Call RBNControlSetToolTipIdx(nCtrlIdx, Buttons.DisplayName, Buttons.Tooltip, "") End If
+		
+		'add click handler
+		Call RBNControlSetCustomMBXHandlerIdx(nCtrlIdx, "buttonClicked")
+		
+		'store the internal button ID and other values in an array - used when a button is clicked.
+		ReDim ButtonObj(buttonID)
+		ButtonObj(buttonID).Name = Buttons.Name
+		ButtonObj(buttonID).DisplayName = Buttons.DisplayName
+		ButtonObj(buttonID).Type = Buttons.ButtonType
+		ButtonObj(buttonID).Group = Buttons.Group
+		ButtonObj(buttonID).Tab = Buttons.Tab
+		ButtonObj(buttonID).Action = Buttons.Action
+		ButtonObj(buttonID).Path = Buttons.Path
+		ButtonObj(buttonID).LayerScale = Buttons.LayerScale
+		ButtonObj(buttonID).CtrlIdx = RBNControlGetControlIDIdx(nCtrlIdx)
+		ButtonObj(buttonID).nCtrlIdx = nCtrlIdx
+		Fetch Next From Buttons
+	Loop
+	Close Table Buttons
+	If(missingButtons > 0) Then 
+		Print missingButtons & " button(s) had an invalid ParentName set so have not been added. Check your config.xlsx"
+		'is this required now XLSX has built in validation?
+	End If
+	
+	Exit Sub
+	addButtOnError:	
+		print err() & " " & error$()
+		exit sub
+	defaulterror:
+		print "Error in createRibbonSubgroups(): " & Error$() & " " & Err()
+		End Program
+End Sub
+
+
+'*************************************
+Sub Endhandler
+	'print "running end handler" 
+	Call RBNEndHandler
+End Sub
+
+'*************************************
+
+Sub buttonClicked
+	OnError GoTo defaultError
+	Dim	nItem,i As Integer
+	nItem	= CommandInfo(CMD_INFO_TOOLBTN)
+	If Ubound(ButtonObj) > 0 Then
+		For i = 1 to Ubound(ButtonObj) 
+			If ButtonObj(i).CtrlIdx = nItem Then
+				Call runTheAction(i)
+				Exit Sub
+			End If
+		Next
+	Else
+		note "line 353: not all buttonobj created yet?"
+		print "line 353: not all buttonobj created yet?"
+	End If
+	Exit Sub
+	defaultError:
+		print "Error in buttonClicked(): "& Err() & "  " & Error$()
+		Resume Next
+End Sub
+
+Sub subgroupClicked
+	OnError GoTo defaultError
+	Dim	nItem,i,ii As Integer
+	Dim requiredButton as String
+	nItem	= CommandInfo(CMD_INFO_TOOLBTN)
+	'Loop through all subgrp CtrlIdx to find the buttonID clicked (i.e ID in spreadsheet)
+	For i = 1 to Ubound(SubGroupObj) 
+		If SubGroupObj(i).CtrlIdx = nItem Then
+			'we now have the subgroup ID stored as i
+			'the subgroup acts as a button, so now we need to find the button that the subgroup should impersonate
+			requiredButton = SubGroupObj(i).Action 'this is the name of the button
+			For ii = 1 to Ubound(ButtonObj) 
+				If(requiredButton = ButtonObj(ii).Name) Then
+					Call runTheAction(ii)
+					Exit Sub
+				End If
+			Next
+		End If
+	Next
+	Exit Sub
+	defaultError:
+		print "Error in subgroupClicked(): "& Err() & "  " & Error$()
+		Resume Next
+End Sub
+
+Sub runTheAction (ByVal ButtonID as integer)
+	OnError GoTo defaultError
+	Do Case ButtonObj(ButtonID).Action
+		Case "AddLayer" 
+			Call openLayer(ButtonID)
+		Case "AddThematicLayer" 
+			'print "adding thematic layer"
+			Call openLayer(ButtonID)
+		Case "BrowseTable" 
+			Call browseTable(ButtonID)
+		Case "OpenWorkspace"
+			Run Application ButtonObj(ButtonID).path
+		Case "CustomAction" 
+			Call runCustomCommand(ButtonID)
+		Case "RunTool" 
+			Call runTool(ButtonID)
+		Case "MenuCommand"
+			Run Command "Run Menu Command " & ButtonObj(ButtonID).path
+	End Case
+	Call RBNSelectTab(ButtonObj(ButtonID).Tab) 'ensure the ribbon tab we were on is still the active ribbon tab.
+	Exit Sub
+	defaultError:
+		print "Error in runTheAction(): "& Err() & "  " & Error$() &  " " & ButtonObj(ButtonID).path & " " & ButtonObj(ButtonID).name
+End Sub
+
+Sub openLayer(ByVal clickedButtonID as Integer)
+	OnError GoTo printerror
+	Dim tabPath as string
+	Dim	nMID, i As Integer
+	Dim currentScale as float	
+
+	tabPath = ButtonObj(clickedButtonID).Path
+	
+	'Check that the button actually has an associated .TAB file
+	If (tabPath = "") Then
+		Call RBNNotificationShow(PRGIGetApplicationName(), "This button has no action - edit config to set the layer you want to open", Notify_Info, 4000)
+		Exit Sub
+	End If
+	
+'************ REMOVE LAYER FROM MAP IF ALREADY OPEN/ADDDED ************
+	
+	If FrontWindow() > 0  Then 'first check if a window is open
+		If WindowInfo(FrontWindow(), WIN_INFO_TYPE) = 1 Then 'then check to see if front window is a map
+			For i = 1 to MapperInfo(FrontWindow(),MAPPER_INFO_LAYERS)'loop through all layers in map
+				If tabPath = LayerInfo( FrontWindow(), i, LAYER_INFO_PATH ) OR (tabPath & ".TAB") = LayerInfo( FrontWindow(), i, LAYER_INFO_PATH ) Then 'check if TAB is open in this map
+					'the ".TAB" extension is optional in XLSX so we must check for both in the IF above
+					If ButtonObj(clickedButtonID).Type = "ToggleButton" Then
+						Close Table LayerInfo(FrontWindow(), i, LAYER_INFO_NAME) 'should we close the TAB entirely, or just remove from this map?
+						Call RBNControlSelectedIdx(ButtonObj(clickedButtonID).nCtrlIdx, FALSE )'ensure toggle button is switched OFF
+					Else 'not a toggle button, so tell user the layer they tried to add is already in the map
+						Call RBNNotificationShow(PRGIGetApplicationName(), "'"& ButtonObj(clickedButtonID).DisplayName & "' already added to current map", Notify_Info, 4000)
+					End If
+					Exit Sub
+				End If 
+			Next 'next layer in map
+		Else 
+			'print "front window is not a map"
+		End If
+	Else
+		'note "Front window is 0, therefore no windows open"
+	End If
+
+'If we reach this point then the layer is not open yet
+
+'************ ADD LAYER TO MAP  ************
+	nMID = MAPFrontMostWindow() 'finds nearest/most recent map window
+	If nMID > 0 Then 'There is a map window open somewhere
+		currentScale = MapperInfo(nMID,MAPPER_INFO_SCALE) * 63360 'get the scale of the mapwindow. Needs to be multiplied by this number, but what is it?? will it change with different projections?
+		
+		'Check if the current map scale is greater than 2x the desired scale set by the user.
+		If ButtonObj(clickedButtonID).LayerScale > 0 AND currentScale >ButtonObj(clickedButtonID).LayerScale*2  = true Then 
+			'if so, ask user if they really want to open a table at this scale which could cause mapinfo to lockup, or take ages to load. e.g load Addressbase at a national level.
+			If NOT ask("You are about to open " & PathToTableName$(tabPath) & " at a scale of " & int(currentScale/1000)&"k" & chr$(13) & chr$(13) & "Do you want to continue?", "Yes", "No") then
+				'user decided not to open table, so ensure toggle button is OFF and exit sub
+				Call RBNControlSelectedIdx(ButtonObj(clickedButtonID).nCtrlIdx, FALSE)
+				Exit sub
+			End If
+		End If
+		Open Table tabPath
+		Set Window nMid Front 'The map window may not be the front window, so bring it to front just in case.
+		
+		'check if layer has built in theme
+		If  TableInfo(PathToTableName$(tabPath),TAB_INFO_THEME_METADATA) Then 
+		 	'if so tell user to manually add layer to map (this is workaround as the embedded theme in the .tab doesnt seem to work if added the layer is added to a map via mapbasic)
+			Call RBNNotificationShow(PRGIGetApplicationName(), "You must manually add the layer to the map to ensure thematic style is applied correctly", Notify_Info, 6000)	
+		Else 'if no built in theme, then add to map as normal
+			Run Command "Add Map Window " & nMID & " Auto Layer " & PathToTableName$(tabPath)
+		End If
+		
+	Else 'no map window is open, so we need to create one.
+
+		Open Table tabPath
+		
+		'check if layer has built in theme
+		If  TableInfo(PathToTableName$(tabPath),TAB_INFO_THEME_METADATA) Then 
+			'if so tell user to manually add layer to map (this is workaround as the embedded theme in the .tab doesnt seem to work if added the layer is added to a map via mapbasic)
+			Call RBNNotificationShow(PRGIGetApplicationName(), "You must manually add the layer to the map to ensure thematic style is applied", Notify_Info, 6000)
+		Else 'if no built in theme, then add to new map as normal, setting the scale to the users desired scale
+			Run Command "Map From " & PathToTableName$(tabPath)
+			Set Map Redraw Off
+			If(ButtonObj(clickedButtonID).LayerScale > 0) Then
+				Set Map  Scale 1 Units "cm" For ButtonObj(clickedButtonID).LayerScale Units "cm"
+			End If
+			Set Map Redraw On
+		End If
+	End If
+
+	'if we reach this point, then the layer has been switched on, so set toggle button to ON (if it is a toggle button of course)
+	If ButtonObj(clickedButtonID).Type = "ToggleButton" Then
+		Call RBNControlSelectedIdx(ButtonObj(clickedButtonID).nCtrlIdx, TRUE)
+	End If
+	
+	Exit Sub
+	printerror:
+		Call RBNNotificationShow(PRGIGetApplicationName(), "Unable to open " & tabPath, Notify_Info, 8000)
+		'Print "Error$(): " & Error$()
+		'Print " Err(): " & Err()
+		Print "Unable to open " & tabPath 
+		Print "Please ensure this file exists and you have permission to access it"
+		If ButtonObj(clickedButtonID).Type = "ToggleButton" Then
+			Call RBNControlSelectedIdx(ButtonObj(clickedButtonID).nCtrlIdx, TRUE)
+		End If
+End Sub
+'*************************************
+
+Sub browseTable(ByVal clickedButtonID as Integer)
+	OnError GoTo browseError
+	Dim tabPath as string
+	tabPath = ButtonObj(clickedButtonID).Path
+	
+	Open Table tabPath
+	Browse * From PathToTableName$(tabPath)
+	Exit Sub
+	browseError:
+		Call RBNNotificationShow(PRGIGetApplicationName(), "Unable to open " & tabPath, Notify_Info, 8000)
+		'Print "Error$(): " & Error$()
+		'Print " Err(): " & Err()
+		Print "Unable to open " & tabPath 
+		Print "Please ensure this file exists and you have permission to access it"
+		If ButtonObj(clickedButtonID).Type = "ToggleButton" Then
+			Call RBNControlSelectedIdx(ButtonObj(clickedButtonID).nCtrlIdx, TRUE)
+		End If
+End Sub
+
+Sub runTool(ByVal clickedButtonID as Integer)
+	onError goto defaultError
+	'this will run an MBX. Usually this will be an MBX which immediately runs and does something, rather than an MBX that opens and adds some menu commands or buttons.
+	Run Application ButtonObj(clickedButtonID).Path
+	Exit Sub
+	defaultError:
+		Note "Error opening tool: " & ButtonObj(clickedButtonID).Path
+		Resume Next
+End Sub
+
+
+Sub runCustomCommand(ByVal clickedButtonID as Integer)
+	'These will be custom commands that the user will have to code themselves.
+	
+	Do Case ButtonObj(clickedButtonID).Path 'this stores the action too
+		Case "Close" 'close RibbonBuilder
+			End Program
+			
+		Case "Refresh" 'this will reload the XLSX config and rebuild the tab files
+			Call RBNClearCustomRibbonElements 'remove all added elements
+			Call cleanup 'delete the config tabs
+			Call populateRibbon 'load new config tabs and build new ribbon interface
+			
+		Case "Reload" 'this will just reload the tab files with the existing config. i.e just rebuild the ribbons
+			Call RBNClearCustomRibbonElements 'remove all added elements
+			Call populateRibbon 'load existing config tabs and build new ribbon interface
+			
+		Case "EditSmartText" 'open the smart text xml file in notepad.
+			'will all users have this same filepath??
+			'is there an MI/Windows env variable that will be safer
+			Run Program "notepad.exe C:\Users\" & Env$("USERNAME") &"\AppData\Roaming\MapInfo\MapInfo\Professional\" & SystemInfo(SYS_INFO_MIVERSION) & "\SmartTextAliases.xml"
+			
+		Case "EditConfig" 'try and launch the XLSX in the default application. e.g Excel, may not work correctly if filetype is not associated.
+			Run Program "cmd /C " & chr$(34) & ApplicationDirectory$() & "config.xlsx"& chr$(34)
+			
+		Case "About"
+			Note "RibbonBuilder v" & versionNo & chr$(13) & chr$(13) & "To update this tool, edit: " & ApplicationDirectory$()&"Config.xlsx" & chr$(13) & chr$(13)  & "Developed by Brendan Stone - HealthGIS, NHS SCW CSU" 
+	End Case
+	Exit Sub
+	resumeNext:
+		Resume Next
+End Sub
+
+
+Function IsTableOpen(ByVal sTabName as String) as Logical
+  Dim n As Integer
+
+  IsTableOpen = True
+  OnError GoTo ERROR_SPOT
+  n = TableInfo(sTabName, TAB_INFO_NROWS)
+
+  Exit Function
+ERROR_SPOT:
+  IsTableOpen = False
+  Exit Function
+End Function
+
+
+sub killTable (ByVal tab2kill as string)
+'e.g. Call killTable ("c:\points") include full path with or without .tab extension, can also send just the table name (if it is open).
+
+OnError GoTo killError
+	If NOT (tab2kill like "%\%") then 'tab2kill doesnt contain a full path, probably contains the tab name only
+		'print "non full path given: " & tab2kill
+		dim tab2kill_temp as string
+		tab2kill_temp = tableinfo(tab2kill,TAB_INFO_TABFILE) 'returns full path
+		close table tab2kill
+		tab2kill = tab2kill_temp
+	Else 'full file path supplied?
+		Close Table PathToFileName$(tab2kill)
+		'print "full path given: " & tab2kill
+	End If 
+	
+	If  right$(tab2kill,4) = ".tab" then 'check if .tab has been included in path, if so remove it.
+		tab2kill = left$(tab2kill,len(tab2kill)-4)
+	End If
+	
+	'print "killing " & tab2kill & ".*"
+	
+	kill tab2kill & ".tab"
+	kill tab2kill & ".map"
+	kill tab2kill & ".dat"
+	kill tab2kill & ".id"
+	kill tab2kill & ".ind"
+	kill tab2kill & ".aid"
+	'any others?
+	Exit Sub
+killError:
+	'print error$()
+	Resume Next
+End Sub
+
+Function formatImageURI(ByVal image As String) As String
+	Dim FormattedImage As String
+	FormattedImage = image
+	If image LIKE "%.png" AND image NOT LIKE "pack://%" Then
+		FormattedImage = ApplicationDirectory$() &"images\"& image
+	End If
+	formatImageURI = FormattedImage
+End Function

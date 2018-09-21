@@ -1,0 +1,12 @@
+Include "mapbasic.def"
+Include "menu.def"
+Include "icons.def"
+
+Declare Sub main
+
+Sub main 'this sub will run, load the specific version of RibbonBuilder below and then quit - meaning it can always be edited and recompiled even if people are using the tool it launches.
+	Dim MBXname As String
+	MBXname = "RibbonBuilder64_v0.52.MBX"
+	Terminate Application  MBXname
+	Run Application ApplicationDirectory$() & MBXname
+End Sub

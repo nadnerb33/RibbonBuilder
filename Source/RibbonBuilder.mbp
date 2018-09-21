@@ -1,0 +1,13 @@
+[LINK]
+Application=..\RibbonBuilder64_v0.52.mbx
+Module=..\..\_mbLibrary\ARRAYLib.mbo
+Module=..\..\_mbLibrary\CONFIGFILELib.mbo
+Module=..\..\_mbLibrary\DEBUGLib.mbo
+Module=..\..\_mbLibrary\ERRORLib.mbo
+Module=..\..\_mbLibrary\FILELib 1251.mbo
+Module=..\..\_mbLibrary\MAPPERLib.mbo
+Module=..\..\_mbLibrary\ProgramInfo.mbo
+Module=..\..\_mbLibrary\RESSTRNGLib.MBO
+Module=..\..\_mbLibrary\RIBBONLib.mbo
+Module=..\..\_mbLibrary\STRINGLib.mbo
+Module=RibbonBuilder.mbo

@@ -1,6 +1,7 @@
 *.tab
 *.dat
 Archive/*
+Config.xlsx
 
 
 # Windows thumbnail cache files
@@ -26,3 +27,5 @@ $RECYCLE.BIN/
 # =========================
 # Operating System Files
 # =========================
+~$*
+~pc-*

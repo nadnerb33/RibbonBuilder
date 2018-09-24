@@ -8,4 +8,11 @@ The tool has 2 major functionalities:
 
 2.	Allows the administrator to configure which tools are automatically loaded on all users MI Pro instances ensuring all users are running the same, up to date versions of all tools. When new MI Pro installations are made the process of adding all the required tools is as simple as adding RibbonBuilder and setting it to AutoLoad.
 
-For further information please see [RibbonBuilder_Readme.pdf](RibbonBuilder_Readme.pdf)
+
+# Usage
+
+1. Copy [Config_example.xlsx](Config_example.xlsx) or [Config_template.xlsx](Config_template.xlsx) and rename to Config.xlsx
+2. Configure Config.xlsx (see comments in column headers on each tab)
+3. Add [RibbonBuilder64_Launcher.MBX](RibbonBuilder64_Launcher.MBX) to the MI Pro Tool Extensions and set to AutoLoad.
+
+For more detailed usage instructions and further information please see [RibbonBuilder_Readme.pdf](RibbonBuilder_Readme.pdf)
